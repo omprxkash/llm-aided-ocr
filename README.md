@@ -1,1 +1,2 @@
-# pjt2_LLM-Aided-OCR
+#LLM-Aided-OCR
+Visually Impaired People
