@@ -1,1 +1,1 @@
-# pjt2_textsight
+# pjt2_LLM-Aided-OCR
