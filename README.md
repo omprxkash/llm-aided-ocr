@@ -262,9 +262,9 @@ The script generates detailed logs of the entire process, including timing infor
 2. Update the `input_pdf_file_path` variable in the `main()` function with your PDF filename.
 
 3. Run the script:
-   ```
-   python llm_aided_ocr.py
-   ```
+   
+  `llm_aided_ocr.py`
+   
 
 4. The script will generate several output files, including the final post-processed text.
 
@@ -324,4 +324,4 @@ This project is licensed under the MIT License.
 
 
 
-In addition to just getting the optimized version of the document, you can also generate many other kinds of "derived documents" from the original: interactive multiple-choice quizzes that you can actually take and get graded on; slick looking presentation slides as PDF or HTML (using LaTeX and Reveal.js), an in-depth summary, a concept mind map (using Mermaid diagrams) and outline, custom lesson plans where you can select your target audience, a readability analysis and grade-level versions of your original document (good for simplifying concepts for students), Anki Flashcards that you can import directly into the Anki app or use on the site in a nice interface, and more.
+
