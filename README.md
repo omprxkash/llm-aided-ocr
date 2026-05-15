@@ -105,7 +105,11 @@ This Python script provides a powerful pipeline for converting PDF documents int
 
 Create a `.env` file in the root directory of the project with the following variables:
 
-```env
+
+
+
+
+
 # General Settings
 USE_LOCAL_LLM=False # Set to True to use a local GGUF model, False for API
 API_PROVIDER="OPENAI" # or "CLAUDE" if USE_LOCAL_LLM=False
