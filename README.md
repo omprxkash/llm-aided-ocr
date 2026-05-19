@@ -1,10 +1,12 @@
 # LLM-Aided OCR
 
+**Live site:** **[omprxkash.github.io/llm-aided-ocr](https://omprxkash.github.io/llm-aided-ocr/)**
+
 Turn scanned PDFs into clean, accurate text. This project takes the raw output from Tesseract OCR and passes it through a large language model to fix the usual OCR errors — split words, misread characters, stray page numbers — and reformat the result as either plain text or proper Markdown.
 
 It works with OpenAI or a fully local Llama model. There's a Flask web app for uploads, a CLI for batch jobs, and a Docker setup if you want GPU acceleration.
 
-A project website is included as `index.html` at the root.
+The project website (`index.html` at the root) walks through the pipeline, shows a live before/after comparison from a 1975 Warren Buffett letter, and links to every artefact in `docs/`.
 
 ---
 
@@ -166,7 +168,7 @@ The container exposes SSH on port `3232` and shares 32 GB of shared memory.
 2. **PDF → images** — `pdf2image` rasterises each page using Poppler.
 3. **OCR** — Tesseract runs over every page in a thread pool.
 4. **Chunking** — the combined text is split into ~8000-character chunks that respect paragraph and sentence boundaries, with overlap between chunks so the LLM never loses context.
-5. **LLM correction** — each chunk is sent to the configured LLM with a prompt that asks it to fix OCR errors without changing the meaning. API providers run chunks concurrently with `asyncio.gather()`; the local LLM runs sequentially.
+5. **LLM correction** — each chunk is sent to the configured LLM with a prompt that asks it to fix OCR errors without changing the meaning. The OpenAI path runs chunks concurrently with `asyncio.gather()`; the local Llama path runs sequentially.
 6. **Markdown pass (optional)** — a second prompt converts the corrected text into properly structured Markdown.
 7. **Reassembly + save** — chunks are stitched back together and written to disk.
 8. **Quality score** — a final LLM call compares the raw OCR and the cleaned output and returns a score out of 100 with an explanation.
