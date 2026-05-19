@@ -18,7 +18,6 @@ from decouple import Config as DecoupleConfig, RepositoryEnv
 import cv2
 from filelock import FileLock, Timeout
 from transformers import AutoTokenizer
-from anthropic import AsyncAnthropic
 #import pyttsx3
 import openai
 from flask import Flask, render_template, request, send_file
@@ -38,11 +37,8 @@ except ImportError:
 config = DecoupleConfig(RepositoryEnv('.env'))
 
 USE_LOCAL_LLM = config.get("USE_LOCAL_LLM", default=False, cast=bool)
-API_PROVIDER = config.get("API_PROVIDER", default="OPENAI", cast=str) # OPENAI or CLAUDE
-ANTHROPIC_API_KEY = config.get("ANTHROPIC_API_KEY", default="your-anthropic-api-key", cast=str)
+API_PROVIDER = config.get("API_PROVIDER", default="OPENAI", cast=str) # OPENAI
 OPENAI_API_KEY = config.get("OPENAI_API_KEY", default="your-openai-api-key", cast=str)
-CLAUDE_MODEL_STRING = config.get("CLAUDE_MODEL_STRING", default="claude-3-haiku-20240307", cast=str)
-CLAUDE_MAX_TOKENS = 4096 # Maximum allowed tokens for Claude API
 TOKEN_BUFFER = 500  # Buffer to account for token estimation inaccuracies
 TOKEN_CUSHION = 300 # Don't use the full max tokens to avoid hitting the limit
 OPENAI_COMPLETION_MODEL = config.get("OPENAI_COMPLETION_MODEL", default="gpt-4o-mini", cast=str)
@@ -163,8 +159,6 @@ def load_model(llm_model_name: str, raise_exception: bool = True):
 async def generate_completion(prompt: str, max_tokens: int = 5000) -> Optional[str]:
     if USE_LOCAL_LLM:
         return await generate_completion_from_local_llm(DEFAULT_LOCAL_MODEL_NAME, prompt, max_tokens)
-    elif API_PROVIDER == "CLAUDE":
-        return await generate_completion_from_claude(prompt, max_tokens)
     elif API_PROVIDER == "OPENAI":
         return await generate_completion_from_openai(prompt, max_tokens)
     else:
@@ -174,8 +168,6 @@ async def generate_completion(prompt: str, max_tokens: int = 5000) -> Optional[s
 def get_tokenizer(model_name: str):
     if model_name.lower().startswith("gpt-"):
         return tiktoken.encoding_for_model(model_name)
-    elif model_name.lower().startswith("claude-"):
-        return AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b", clean_up_tokenization_spaces=False)
     elif model_name.lower().startswith("llama-"):
         return AutoTokenizer.from_pretrained("huggyllama/llama-7b", clean_up_tokenization_spaces=False)
     else:
@@ -269,49 +261,6 @@ def adjust_overlaps(chunks: List[str], tokenizer, max_chunk_tokens: int, overlap
                 adjusted_chunks.append(' '.join(chunks[i-1].split()[-overlap_size:] + chunks[i].split()))
     
     return adjusted_chunks
-
-async def generate_completion_from_claude(prompt: str, max_tokens: int = CLAUDE_MAX_TOKENS - TOKEN_BUFFER) -> Optional[str]:
-    if not ANTHROPIC_API_KEY:
-        logging.error("Anthropic API key not found. Please set the ANTHROPIC_API_KEY environment variable.")
-        return None
-    client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-    prompt_tokens = estimate_tokens(prompt, CLAUDE_MODEL_STRING)
-    adjusted_max_tokens = min(max_tokens, CLAUDE_MAX_TOKENS - prompt_tokens - TOKEN_BUFFER)
-    if adjusted_max_tokens <= 0:
-        logging.warning("Prompt is too long for Claude API. Chunking the input.")
-        chunks = chunk_text(prompt, CLAUDE_MAX_TOKENS - TOKEN_CUSHION, CLAUDE_MODEL_STRING)
-        results = []
-        for chunk in chunks:
-            try:
-                async with client.messages.stream(
-                    model=CLAUDE_MODEL_STRING,
-                    max_tokens=CLAUDE_MAX_TOKENS // 2,
-                    temperature=0.7,
-                    messages=[{"role": "user", "content": chunk}],
-                ) as stream:
-                    message = await stream.get_final_message()
-                    results.append(message.content[0].text)
-                    logging.info(f"Chunk processed. Input tokens: {message.usage.input_tokens:,}, Output tokens: {message.usage.output_tokens:,}")
-            except Exception as e:
-                logging.error(f"An error occurred while processing a chunk: {e}")
-        return " ".join(results)
-    else:
-        try:
-            async with client.messages.stream(
-                model=CLAUDE_MODEL_STRING,
-                max_tokens=adjusted_max_tokens,
-                temperature=0.7,
-                messages=[{"role": "user", "content": prompt}],
-            ) as stream:
-                message = await stream.get_final_message()
-                output_text = message.content[0].text
-                logging.info(f"Total input tokens: {message.usage.input_tokens:,}")
-                logging.info(f"Total output tokens: {message.usage.output_tokens:,}")
-                logging.info(f"Generated output (abbreviated): {output_text[:150]}...")
-                return output_text
-        except Exception as e:
-            logging.error(f"An error occurred while requesting from Claude API: {e}")
-            return None
 
 async def generate_completion_from_openai(prompt: str, max_tokens: int = 5000) -> Optional[str]:
     if not OPENAI_API_KEY:
