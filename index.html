@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM-Aided OCR — From Scanned Pages to Perfect Text</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg:     '#0e0f11',
+            card:   '#141617',
+            card2:  '#1d2023',
+            surf:   '#252830',
+            lime:   '#eef35f',
+            limedark:'#3a3c00',
+            purple: '#7b66ff',
+            teal:   '#00cbaa',
+            border: '#3a3d40',
+            g1:     '#61626b',
+            g2:     '#8d8d96',
+            g3:     '#a1a1aa',
+            g4:     '#cfcfd3',
+            g5:     '#e0e1e4',
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        }
+      }
+    }
+  </script>
+  <style>
+    * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+    body { background: #0e0f11; }
+
+    /* highlight errors in red, fixes in green */
+    .ocr-error  { color: #f87171; background: #7f1d1d33; border-radius: 2px; padding: 0 2px; }
+    .ocr-fix    { color: #4ade80; background: #14532d33; border-radius: 2px; padding: 0 2px; }
+
+    /* logo ticker */
+    .ticker-track { display: flex; gap: 48px; animation: ticker 30s linear infinite; white-space: nowrap; }
+    @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+    .fade-mask { mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%); }
+
+    /* glow effects */
+    .green-glow  { box-shadow: 0 0 48px 0 rgba(174,185,30,.08); }
+    .purple-glow { box-shadow: 0 0 48px 0 rgba(123,102,255,.08); }
+    .teal-glow   { box-shadow: 0 0 48px 0 rgba(0,203,170,.08); }
+    .lime-glow   { box-shadow: 0 0 64px 0 rgba(238,243,95,.06); }
+
+    /* step connector dot */
+    .step-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    /* scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #141617; }
+    ::-webkit-scrollbar-thumb { background: #3a3d40; border-radius: 3px; }
+
+    /* animated processing bar */
+    @keyframes progress { 0% { width: 0%; } 100% { width: 87%; } }
+    .progress-bar { animation: progress 2.5s ease-out forwards; }
+
+    /* pulse dot */
+    @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+    .pulse { animation: pulse-dot 1.8s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-bg text-white font-sans text-[13px] leading-relaxed">
+
+<!-- ═══════════════ NAV ═══════════════ -->
+<header class="sticky top-0 z-50 border-b border-border/60 bg-bg/90 backdrop-blur-md">
+  <div class="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-6">
+
+    <!-- Logo -->
+    <a href="#" class="flex items-center gap-2.5 shrink-0">
+      <div class="w-7 h-7 bg-lime rounded-md flex items-center justify-center shrink-0">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="3" width="12" height="1.5" rx=".75" fill="#0e0f11"/>
+          <rect x="2" y="7" width="8"  height="1.5" rx=".75" fill="#0e0f11"/>
+          <rect x="2" y="11" width="10" height="1.5" rx=".75" fill="#0e0f11"/>
+        </svg>
+      </div>
+      <span class="font-bold text-[15px] tracking-tight">LLM-Aided <span class="text-lime">OCR</span></span>
+    </a>
+
+    <nav class="hidden md:flex items-center gap-0.5 text-[13px] text-g3">
+      <a href="#features"  class="px-3 py-1.5 rounded hover:text-white hover:bg-white/5 transition-colors">Features</a>
+      <a href="#pipeline"  class="px-3 py-1.5 rounded hover:text-white hover:bg-white/5 transition-colors">Pipeline</a>
+      <a href="#demo"      class="px-3 py-1.5 rounded hover:text-white hover:bg-white/5 transition-colors">Demo</a>
+      <a href="#providers" class="px-3 py-1.5 rounded hover:text-white hover:bg-white/5 transition-colors">Providers</a>
+      <a href="#research"  class="px-3 py-1.5 rounded hover:text-white hover:bg-white/5 transition-colors">Research</a>
+      <a href="#deploy"    class="px-3 py-1.5 rounded hover:text-white hover:bg-white/5 transition-colors">Deploy</a>
+    </nav>
+
+    <div class="flex items-center gap-3 shrink-0">
+      <a href="https://github.com/omprxkash/llm-aided-ocr" class="hidden sm:flex items-center gap-1.5 text-[13px] text-g3 hover:text-white transition-colors">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        GitHub
+      </a>
+      <a href="#deploy" class="text-[13px] font-semibold bg-lime text-limedark px-4 py-1.5 rounded-md hover:brightness-95 transition-all">Get Started</a>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════ HERO ═══════════════ -->
+<section class="max-w-7xl mx-auto px-6 pt-20 pb-20">
+  <div class="flex flex-col lg:flex-row items-center gap-16">
+
+    <!-- Left copy -->
+    <div class="flex-1 min-w-0">
+      <div class="inline-flex items-center gap-2 border border-border rounded-full px-3 py-1 text-[11px] text-g3 mb-7">
+        <span class="inline-block w-1.5 h-1.5 rounded-full bg-lime pulse"></span>
+        Open-source · Python 3.8+ · Multi-provider LLM
+      </div>
+
+      <h1 class="text-[52px] font-bold leading-[1.05] tracking-[-0.03em] mb-5">
+        From Scanned Pages<br>
+        to Clean,<br>
+        <span class="text-lime">Accurate Text.</span>
+      </h1>
+
+      <p class="text-g3 text-[15px] leading-relaxed max-w-[440px] mb-8">
+        LLM-Aided OCR combines Tesseract's extraction with the intelligence of GPT or local Llama models to correct errors, reformat content, and produce publication-ready documents.
+      </p>
+
+      <div class="flex flex-wrap gap-3 mb-10">
+        <a href="#deploy"   class="bg-lime text-limedark font-semibold text-[13px] px-5 py-2.5 rounded-md hover:brightness-95 transition-all">Get Started Free</a>
+        <a href="#demo"     class="border border-border text-white text-[13px] font-medium px-5 py-2.5 rounded-md hover:border-g1 transition-colors">See Live Demo &rsaquo;</a>
+      </div>
+
+      <!-- Quick stats -->
+      <div class="flex flex-wrap gap-6">
+        <div>
+          <div class="text-[22px] font-bold text-white">2</div>
+          <div class="text-[11px] text-g2 uppercase tracking-wider">LLM Providers</div>
+        </div>
+        <div class="w-px bg-border"></div>
+        <div>
+          <div class="text-[22px] font-bold text-white">5</div>
+          <div class="text-[11px] text-g2 uppercase tracking-wider">Output Modes</div>
+        </div>
+        <div class="w-px bg-border"></div>
+        <div>
+          <div class="text-[22px] font-bold text-white">GPU</div>
+          <div class="text-[11px] text-g2 uppercase tracking-wider">Accelerated</div>
+        </div>
+        <div class="w-px bg-border"></div>
+        <div>
+          <div class="text-[22px] font-bold text-white">Async</div>
+          <div class="text-[11px] text-g2 uppercase tracking-wider">Concurrent API</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: processing mockup -->
+    <div class="flex-1 min-w-0 w-full">
+      <div class="bg-card border border-border rounded-2xl overflow-hidden shadow-2xl lime-glow max-w-[500px] ml-auto">
+        <!-- window bar -->
+        <div class="flex items-center gap-1.5 px-4 py-3 border-b border-border bg-card2">
+          <span class="w-2.5 h-2.5 rounded-full bg-[#ff5f57]"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#febc2e]"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#28c840]"></span>
+          <span class="ml-3 text-[11px] text-g1 font-medium font-mono">llm_aided_ocr — Processing</span>
+        </div>
+
+        <!-- Upload row -->
+        <div class="px-4 pt-4 pb-3 border-b border-border/50">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <div class="w-7 h-7 bg-surf rounded flex items-center justify-center text-[10px]">📄</div>
+              <div>
+                <div class="text-[12px] text-g4 font-medium">warren_buffett_letter.pdf</div>
+                <div class="text-[10px] text-g1">16 pages · 2.1 MB</div>
+              </div>
+            </div>
+            <span class="text-[10px] font-semibold text-lime bg-lime/10 px-2 py-0.5 rounded">Processing</span>
+          </div>
+          <!-- progress bar -->
+          <div class="h-1 bg-surf rounded-full overflow-hidden">
+            <div class="progress-bar h-full bg-lime rounded-full"></div>
+          </div>
+          <div class="flex justify-between mt-1">
+            <span class="text-[10px] text-g1">LLM Correction · Chunk 11/13</span>
+            <span class="text-[10px] text-g1">87%</span>
+          </div>
+        </div>
+
+        <!-- Output preview -->
+        <div class="p-4 space-y-2.5">
+          <div class="text-[10px] text-g1 uppercase tracking-wider font-semibold mb-1">Output Modes</div>
+
+          <div class="bg-card2 rounded-lg px-3 py-2.5 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-[13px]">📝</span>
+              <span class="text-[12px] text-g4">Cleaned Text</span>
+            </div>
+            <span class="text-[11px] font-semibold text-teal">✓ Ready</span>
+          </div>
+          <div class="bg-card2 rounded-lg px-3 py-2.5 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-[13px]">📋</span>
+              <span class="text-[12px] text-g4">Markdown</span>
+            </div>
+            <span class="text-[11px] font-semibold text-teal">✓ Ready</span>
+          </div>
+          <div class="bg-card2 rounded-lg px-3 py-2.5 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-[13px]">💡</span>
+              <span class="text-[12px] text-g4">Summary</span>
+            </div>
+            <span class="text-[11px] font-semibold text-teal">✓ Ready</span>
+          </div>
+          <div class="bg-card2 rounded-lg px-3 py-2.5 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-[13px]">🌍</span>
+              <span class="text-[12px] text-g4">Translation (French)</span>
+            </div>
+            <span class="text-[11px] font-semibold text-purple">In Progress…</span>
+          </div>
+          <div class="bg-card2 rounded-lg px-3 py-2.5 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-[13px]">🔊</span>
+              <span class="text-[12px] text-g4">Audio (gTTS)</span>
+            </div>
+            <span class="text-[11px] font-semibold text-g1">Queued</span>
+          </div>
+        </div>
+
+        <!-- Quality score -->
+        <div class="px-4 pb-4">
+          <div class="bg-surf rounded-lg px-3 py-2.5 flex items-center justify-between">
+            <span class="text-[12px] text-g3">Quality Score</span>
+            <span class="text-[14px] font-bold text-lime">94 / 100</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ TECH STRIP ═══════════════ -->
+<div class="border-y border-border/60 py-6 overflow-hidden">
+  <div class="flex justify-center gap-6 text-[11px] font-semibold text-g1 uppercase tracking-widest mb-5">
+    <span>Extract</span><span class="text-border">◆</span>
+    <span>Correct</span><span class="text-border">◆</span>
+    <span>Reformat</span><span class="text-border">◆</span>
+    <span>Assess</span>
+  </div>
+  <div class="fade-mask overflow-hidden">
+    <div class="ticker-track">
+      <span class="text-g1 font-semibold">Tesseract OCR</span>
+      <span class="text-g1 font-semibold">OpenAI GPT-4o-mini</span>
+      <span class="text-g1 font-semibold">Llama 3.1 8B</span>
+      <span class="text-g1 font-semibold">Flask Web UI</span>
+      <span class="text-g1 font-semibold">pdf2image</span>
+      <span class="text-g1 font-semibold">OpenCV</span>
+      <span class="text-g1 font-semibold">gTTS Audio</span>
+      <span class="text-g1 font-semibold">Docker + GPU</span>
+      <span class="text-g1 font-semibold">asyncio</span>
+      <!-- duplicate for seamless loop -->
+      <span class="text-g1 font-semibold">Tesseract OCR</span>
+      <span class="text-g1 font-semibold">OpenAI GPT-4o-mini</span>
+      <span class="text-g1 font-semibold">Llama 3.1 8B</span>
+      <span class="text-g1 font-semibold">Flask Web UI</span>
+      <span class="text-g1 font-semibold">pdf2image</span>
+      <span class="text-g1 font-semibold">OpenCV</span>
+      <span class="text-g1 font-semibold">gTTS Audio</span>
+      <span class="text-g1 font-semibold">Docker + GPU</span>
+      <span class="text-g1 font-semibold">asyncio</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ PIPELINE SECTION ═══════════════ -->
+<section id="pipeline" class="max-w-6xl mx-auto px-6 py-28">
+  <h2 class="text-[32px] font-bold text-center tracking-tight mb-4">The LLM-Aided OCR Pipeline</h2>
+  <p class="text-g3 text-center text-[15px] max-w-xl mx-auto mb-20 leading-relaxed">
+    A seven-step pipeline turns any scanned PDF into clean, structured text — fully configurable, chunked for large documents, and scored for quality.
+  </p>
+
+  <!-- Phase 1: PDF → Raw OCR -->
+  <div id="features" class="flex flex-col lg:flex-row items-center gap-16 mb-28">
+    <div class="flex-1">
+      <div class="text-[11px] text-g2 uppercase tracking-widest font-semibold mb-4">Phase 1 — Extraction</div>
+      <h3 class="text-[28px] font-bold leading-tight tracking-tight mb-4">PDF to Raw Text<br>via Tesseract OCR</h3>
+      <a href="#deploy" class="text-lime text-[13px] font-semibold hover:underline mb-7 block">Quick setup &rsaquo;</a>
+      <div class="space-y-5 text-[13px]">
+        <div>
+          <div class="text-g4 font-semibold mb-1">PDF → Image Conversion</div>
+          <div class="text-g2 leading-relaxed">Each PDF page is rasterised to a high-resolution image using <code class="text-lime bg-lime/10 px-1 rounded text-[11px]">pdf2image</code> and Poppler. Page ranges and skip counts are fully configurable.</div>
+        </div>
+        <div>
+          <div class="text-g4 font-semibold mb-1">Image Pre-processing</div>
+          <div class="text-g2 leading-relaxed">OpenCV applies Otsu thresholding and dilation to improve character contrast before handing off to Tesseract.</div>
+        </div>
+        <div>
+          <div class="text-g4 font-semibold mb-1">Concurrent OCR Extraction</div>
+          <div class="text-g2 leading-relaxed">Pages are processed in parallel via <code class="text-lime bg-lime/10 px-1 rounded text-[11px]">ThreadPoolExecutor</code>, cutting wall-clock time for large documents significantly.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card: olive border -->
+    <div class="flex-1 w-full">
+      <div class="bg-card border-2 border-[#6b7a1a] rounded-2xl overflow-hidden green-glow max-w-[440px]">
+        <div class="flex items-center gap-1.5 px-4 py-3 border-b border-border bg-card2">
+          <span class="w-2 h-2 rounded-full bg-[#ff5f57]"></span>
+          <span class="w-2 h-2 rounded-full bg-[#febc2e]"></span>
+          <span class="w-2 h-2 rounded-full bg-[#28c840]"></span>
+          <span class="ml-3 text-[11px] text-g1 font-mono">Phase 1 — Raw OCR Output</span>
+        </div>
+        <div class="p-4 font-mono text-[11px] leading-6 space-y-1 text-g3">
+          <div class="text-[10px] text-g1 uppercase tracking-wider mb-2">tesseract output (raw)</div>
+          <div>fo control promises rationally, it is</div>
+          <div>necessary <span class="ocr-error">fo</span> understand the basic</div>
+          <div>arithmetic and practical rules governing</div>
+          <div>pension plans.</div>
+          <div class="mt-2 text-g1">-2-</div>
+          <div class="mt-1">they had $2.2 billion in the <span class="ocr-error">hank</span>,</div>
+          <div>whose economic results would impact</div>
+          <div>future values <span class="ocr-error">fo</span>r the shareholders.</div>
+          <div class="mt-2">elient ~ and even then is not free</div>
+          <div>from <span class="ocr-error">pitfaLLs</span>.</div>
+          <div class="mt-3 pt-3 border-t border-border/50 flex items-center justify-between">
+            <span class="text-[10px] text-g1">16 pages extracted</span>
+            <span class="text-[10px] text-lime">→ Passing to LLM</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 2: LLM Correction -->
+  <div class="flex flex-col lg:flex-row-reverse items-center gap-16 mb-28">
+    <div class="flex-1">
+      <div class="text-[11px] text-g2 uppercase tracking-widest font-semibold mb-4">Phase 2 — Correction</div>
+      <h3 class="text-[28px] font-bold leading-tight tracking-tight mb-4">Intelligent Chunking<br>& LLM Error Correction</h3>
+      <a href="#providers" class="text-lime text-[13px] font-semibold hover:underline mb-7 block">Choose your LLM &rsaquo;</a>
+      <div class="space-y-5 text-[13px]">
+        <div>
+          <div class="text-g4 font-semibold mb-1">Context-Aware Chunking</div>
+          <div class="text-g2 leading-relaxed">Large documents are split at paragraph and sentence boundaries into overlapping 8,000-character chunks so no context is lost across chunk boundaries.</div>
+        </div>
+        <div>
+          <div class="text-g4 font-semibold mb-1">OCR Error Correction Prompt</div>
+          <div class="text-g2 leading-relaxed">Each chunk is sent with a structured prompt that instructs the LLM to fix split words, misread characters (<code class="text-lime bg-lime/10 px-1 rounded text-[11px]">rn → m</code>), and stray page numbers while preserving all original meaning.</div>
+        </div>
+        <div>
+          <div class="text-g4 font-semibold mb-1">Async Concurrent Processing</div>
+          <div class="text-g2 leading-relaxed">When using OpenAI as the API-based LLM, all chunks are dispatched concurrently via <code class="text-lime bg-lime/10 px-1 rounded text-[11px]">asyncio.gather()</code> and re-ordered after completion.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card: purple border -->
+    <div class="flex-1 w-full">
+      <div class="bg-card border-2 border-[#4b3d8a] rounded-2xl overflow-hidden purple-glow max-w-[440px] lg:ml-auto">
+        <div class="flex items-center gap-1.5 px-4 py-3 border-b border-border bg-card2">
+          <span class="w-2 h-2 rounded-full bg-[#ff5f57]"></span>
+          <span class="w-2 h-2 rounded-full bg-[#febc2e]"></span>
+          <span class="w-2 h-2 rounded-full bg-[#28c840]"></span>
+          <span class="ml-3 text-[11px] text-g1 font-mono">Phase 2 — LLM Corrected</span>
+        </div>
+        <div class="p-4 font-mono text-[11px] leading-6 space-y-1 text-g3">
+          <div class="text-[10px] text-g1 uppercase tracking-wider mb-2">after llm correction</div>
+          <div><span class="ocr-fix">To</span> control promises rationally, it is</div>
+          <div>necessary to understand the basic</div>
+          <div>arithmetic and practical rules governing</div>
+          <div>pension plans.</div>
+          <div class="mt-2">they had $2.2 billion in the <span class="ocr-fix">bank</span>,</div>
+          <div>whose economic results would impact</div>
+          <div>future values for the shareholders.</div>
+          <div class="mt-2"><span class="ocr-fix">client</span> — and even then is not free</div>
+          <div>from <span class="ocr-fix">pitfalls</span>.</div>
+          <div class="mt-3 pt-3 border-t border-border/50 flex items-center gap-3">
+            <span class="text-[10px] text-g1">13 chunks · async</span>
+            <span class="text-[10px] text-purple">gpt-4o-mini</span>
+            <span class="text-[10px] text-teal ml-auto">✓ Corrected</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 3: Markdown + Quality -->
+  <div class="flex flex-col lg:flex-row items-center gap-16">
+    <div class="flex-1">
+      <div class="text-[11px] text-g2 uppercase tracking-widest font-semibold mb-4">Phase 3 — Output</div>
+      <h3 class="text-[28px] font-bold leading-tight tracking-tight mb-4">Markdown Formatting<br>& Quality Assessment</h3>
+      <a href="#deploy" class="text-lime text-[13px] font-semibold hover:underline mb-7 block">Run the pipeline &rsaquo;</a>
+      <div class="space-y-5 text-[13px]">
+        <div>
+          <div class="text-g4 font-semibold mb-1">Structured Markdown</div>
+          <div class="text-g2 leading-relaxed">The corrected text is passed through a second LLM prompt that converts it to proper Markdown — headings, lists, bold, tables — while removing duplicate content and spurious LLM artifacts.</div>
+        </div>
+        <div>
+          <div class="text-g4 font-semibold mb-1">Automated Quality Score</div>
+          <div class="text-g2 leading-relaxed">A final LLM call compares the original OCR output against the processed result, returning a numeric score (0–100) and a human-readable explanation of improvements.</div>
+        </div>
+        <div>
+          <div class="text-g4 font-semibold mb-1">Dual File Output</div>
+          <div class="text-g2 leading-relaxed">Both the raw OCR (<code class="text-lime bg-lime/10 px-1 rounded text-[11px]">__raw_ocr_output.txt</code>) and the LLM-corrected result (<code class="text-lime bg-lime/10 px-1 rounded text-[11px]">_llm_corrected.md</code>) are always saved for comparison.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card: teal border -->
+    <div class="flex-1 w-full">
+      <div class="bg-card border-2 border-[#005144] rounded-2xl overflow-hidden teal-glow max-w-[440px]">
+        <div class="flex items-center gap-1.5 px-4 py-3 border-b border-border bg-card2">
+          <span class="w-2 h-2 rounded-full bg-[#ff5f57]"></span>
+          <span class="w-2 h-2 rounded-full bg-[#febc2e]"></span>
+          <span class="w-2 h-2 rounded-full bg-[#28c840]"></span>
+          <span class="ml-3 text-[11px] text-g1 font-mono">Phase 3 — Quality Report</span>
+        </div>
+        <div class="p-4 space-y-3">
+          <!-- Score -->
+          <div class="flex items-center justify-between bg-card2 rounded-lg px-3 py-3">
+            <span class="text-[12px] text-g3">Quality Score</span>
+            <span class="text-[20px] font-bold text-teal">94 / 100</span>
+          </div>
+          <!-- Output files -->
+          <div class="space-y-1.5">
+            <div class="bg-card2 rounded-lg px-3 py-2.5 flex items-center justify-between">
+              <span class="text-[11px] font-mono text-g4">*__raw_ocr_output.txt</span>
+              <span class="text-[10px] text-g1">saved</span>
+            </div>
+            <div class="bg-card2 rounded-lg px-3 py-2.5 flex items-center justify-between">
+              <span class="text-[11px] font-mono text-g4">*_llm_corrected.md</span>
+              <span class="text-[10px] text-teal">saved</span>
+            </div>
+          </div>
+          <!-- Explanation -->
+          <div class="bg-card2 rounded-lg p-3">
+            <div class="text-[10px] text-g1 uppercase tracking-wider mb-1.5">LLM Explanation</div>
+            <div class="text-[11px] text-g3 leading-relaxed">"Excellent correction of OCR artifacts. All split words fixed, page numbers removed, headings preserved, and markdown structure faithfully represents the source."</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ BEFORE / AFTER DEMO ═══════════════ -->
+<div id="demo" class="border-y border-border/60 py-24 bg-card/30">
+  <div class="max-w-6xl mx-auto px-6">
+    <div class="text-[11px] text-g2 uppercase tracking-widest font-semibold mb-3 text-center">Live Sample</div>
+    <h2 class="text-[30px] font-bold text-center tracking-tight mb-3">See the Difference</h2>
+    <p class="text-g3 text-center text-[14px] max-w-lg mx-auto mb-12 leading-relaxed">
+      Real output from a scanned Warren Buffett letter (1975). Left: raw Tesseract. Right: after LLM correction.
+    </p>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <!-- Raw OCR -->
+      <div class="bg-card border border-border rounded-xl overflow-hidden">
+        <div class="flex items-center gap-2 px-4 py-3 border-b border-border bg-card2">
+          <div class="w-2 h-2 rounded-full bg-red-500"></div>
+          <span class="text-[12px] font-semibold text-g3">Raw Tesseract OCR</span>
+          <span class="ml-auto text-[10px] text-g1">160301289…__raw_ocr_output.txt</span>
+        </div>
+        <div class="p-4 font-mono text-[11px] text-g3 leading-6">
+          <span class="text-g1">1 </span> PENSIONS<br>
+          <span class="text-g1">2 </span><br>
+          <span class="text-g1">3 </span> There are two aspects of the pension cost problem<br>
+          <span class="text-g1">4 </span> upon which manage-<br>
+          <span class="text-g1">5 </span> ment can have a significant impact: (1) maintaining<br>
+          <span class="text-g1">6 </span> rational control<br>
+          <span class="text-g1">7 </span> over pension plan promises <span class="ocr-error">fo</span> employees and (2)<br>
+          <span class="text-g1">8 </span> increasing investment returns on pension plan assets.<br>
+          <br>
+          <span class="text-g1">9 </span> <span class="ocr-error">fo</span> control promises rationally, it is necessary to<br>
+          <span class="text-g1">10</span> understand the basic arithmetic and practical rules<br>
+          <span class="text-g1">11</span> governing pension plans.<br>
+          <br>
+          <span class="text-g1">12</span> <span class="ocr-error">-2-</span><br>
+          <br>
+          <span class="text-g1">13</span> they had $2.2 billion in the <span class="ocr-error">hank</span>", whose economic<br>
+          <span class="text-g1">14</span> results would impact Future values for<br>
+          <span class="text-g1">15</span> the shareholders, dollar for dollar.<br>
+          <br>
+          <span class="text-g1">16</span> This requires a very wise and informed<br>
+          <span class="text-g1">17</span> <span class="ocr-error">elient</span> ~ and even then is not free from pitfaLLs.<br>
+        </div>
+      </div>
+
+      <!-- LLM Corrected -->
+      <div class="bg-card border border-teal/30 rounded-xl overflow-hidden">
+        <div class="flex items-center gap-2 px-4 py-3 border-b border-border bg-card2">
+          <div class="w-2 h-2 rounded-full bg-teal"></div>
+          <span class="text-[12px] font-semibold text-g3">LLM-Corrected Output</span>
+          <span class="ml-auto text-[10px] text-g1">…_llm_corrected.md</span>
+        </div>
+        <div class="p-4 font-mono text-[11px] text-g3 leading-6">
+          <span class="text-lime text-[13px] font-bold"># PENSIONS</span><br>
+          <br>
+          There are two aspects of the pension cost problem<br>
+          upon which management can have a significant<br>
+          impact: (1) maintaining rational control over<br>
+          pension plan promises <span class="ocr-fix">to</span> employees and (2)<br>
+          increasing investment returns on pension plan assets.<br>
+          <br>
+          <span class="text-purple text-[12px] font-semibold">## The Irreversible Nature of Pension Promises</span><br>
+          <br>
+          <span class="ocr-fix">To</span> control promises rationally, it is necessary to<br>
+          understand the basic arithmetic and practical rules<br>
+          governing pension plans.<br>
+          <br>
+          they had $2.2 billion in the <span class="ocr-fix">bank</span>, whose economic<br>
+          results would impact future values for the<br>
+          shareholders, dollar for dollar.<br>
+          <br>
+          This requires a very wise and informed<br>
+          <span class="ocr-fix">client</span> — and even then is not free from <span class="ocr-fix">pitfalls</span>.<br>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-center mt-8">
+      <div class="flex items-center gap-6 text-[12px] text-g2">
+        <div class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-red-900/50 border border-red-400/50"></span> OCR errors</div>
+        <div class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-green-900/50 border border-green-400/50"></span> LLM corrections</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ MULTI-PROVIDER SUPPORT ═══════════════ -->
+<section id="providers" class="max-w-6xl mx-auto px-6 py-24">
+  <div class="text-[11px] text-g2 uppercase tracking-widest font-semibold mb-3 text-center">LLM Providers</div>
+  <h2 class="text-[30px] font-bold text-center tracking-tight mb-3">Cloud or Fully Local</h2>
+  <p class="text-g3 text-center text-[14px] max-w-lg mx-auto mb-14 leading-relaxed">
+    Switch between the OpenAI API and a fully local Llama model with a single environment variable. No code changes needed.
+  </p>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 max-w-3xl mx-auto">
+    <!-- OpenAI -->
+    <div class="bg-card border border-purple/40 rounded-xl p-5 relative">
+      <div class="absolute top-3 right-3 text-[10px] bg-purple/20 text-purple px-2 py-0.5 rounded font-semibold">Default</div>
+      <div class="w-10 h-10 bg-[#10a37f]/15 rounded-xl flex items-center justify-center text-xl mb-4">🤖</div>
+      <div class="text-[14px] font-bold text-white mb-1">OpenAI</div>
+      <div class="text-[11px] text-g1 font-mono mb-3">gpt-4o-mini · gpt-4o</div>
+      <p class="text-[12px] text-g2 leading-relaxed mb-4">Cloud API with async concurrent chunk processing. Fast, accurate, and ideal for production workflows.</p>
+      <div class="text-[11px] font-mono bg-card2 rounded px-2 py-1 text-lime">API_PROVIDER="OPENAI"</div>
+    </div>
+
+    <!-- Local LLM -->
+    <div class="bg-card border border-teal/40 rounded-xl p-5">
+      <div class="w-10 h-10 bg-teal/15 rounded-xl flex items-center justify-center text-xl mb-4">🦙</div>
+      <div class="text-[14px] font-bold text-white mb-1">Local LLM</div>
+      <div class="text-[11px] text-g1 font-mono mb-3">Llama 3.1 8B · GGUF</div>
+      <p class="text-[12px] text-g2 leading-relaxed mb-4">Runs fully offline via llama-cpp-python. Auto-downloads the model. GPU-accelerated with CUDA fallback to CPU.</p>
+      <div class="text-[11px] font-mono bg-card2 rounded px-2 py-1 text-lime">USE_LOCAL_LLM=True</div>
+    </div>
+  </div>
+
+  <!-- .env config block -->
+  <div class="bg-card border border-border rounded-xl overflow-hidden">
+    <div class="flex items-center gap-1.5 px-4 py-3 border-b border-border bg-card2">
+      <span class="w-2 h-2 rounded-full bg-[#ff5f57]"></span>
+      <span class="w-2 h-2 rounded-full bg-[#febc2e]"></span>
+      <span class="w-2 h-2 rounded-full bg-[#28c840]"></span>
+      <span class="ml-3 text-[11px] text-g1 font-mono">.env — Configuration</span>
+    </div>
+    <div class="p-5 font-mono text-[12px] leading-7 grid grid-cols-1 md:grid-cols-2 gap-x-8">
+      <div>
+        <div class="text-g1"># Choose provider</div>
+        <div><span class="text-purple">USE_LOCAL_LLM</span>=<span class="text-lime">False</span></div>
+        <div><span class="text-purple">API_PROVIDER</span>=<span class="text-lime">"OPENAI"</span></div>
+        <br>
+        <div class="text-g1"># OpenAI</div>
+        <div><span class="text-purple">OPENAI_API_KEY</span>=<span class="text-lime">"sk-proj-…"</span></div>
+        <div><span class="text-purple">OPENAI_COMPLETION_MODEL</span>=<span class="text-lime">"gpt-4o-mini"</span></div>
+      </div>
+      <div>
+        <div class="text-g1"># Local Llama (offline, only if USE_LOCAL_LLM=True)</div>
+        <div><span class="text-purple">DEFAULT_LOCAL_MODEL_NAME</span>=<span class="text-lime">"Llama-3.1-8B…"</span></div>
+        <div><span class="text-purple">LOCAL_LLM_CONTEXT_SIZE_IN_TOKENS</span>=<span class="text-lime">2048</span></div>
+        <div><span class="text-purple">USE_VERBOSE</span>=<span class="text-lime">False</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ WEB APP FEATURES ═══════════════ -->
+<div class="border-y border-border/60 py-24 bg-card/20">
+  <div class="max-w-6xl mx-auto px-6">
+    <div class="text-[11px] text-g2 uppercase tracking-widest font-semibold mb-3 text-center">Flask Web Interface</div>
+    <h2 class="text-[30px] font-bold text-center tracking-tight mb-3">Upload. Process. Listen.</h2>
+    <p class="text-g3 text-center text-[14px] max-w-lg mx-auto mb-14 leading-relaxed">
+      The built-in Flask web app accepts a PDF upload and returns five parallel outputs — all accessible in the browser with audio playback.
+    </p>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div class="bg-card border border-border rounded-xl p-4 text-center hover:border-g1 transition-colors">
+        <div class="text-2xl mb-3">📝</div>
+        <div class="text-[13px] font-semibold text-white mb-1">Cleaned Text</div>
+        <div class="text-[11px] text-g2 leading-relaxed">OCR errors corrected, sentences reconnected, artifacts removed.</div>
+      </div>
+      <div class="bg-card border border-border rounded-xl p-4 text-center hover:border-g1 transition-colors">
+        <div class="text-2xl mb-3">💡</div>
+        <div class="text-[13px] font-semibold text-white mb-1">Summary</div>
+        <div class="text-[11px] text-g2 leading-relaxed">LLM-generated concise summary of the document content.</div>
+      </div>
+      <div class="bg-card border border-purple/40 rounded-xl p-4 text-center">
+        <div class="text-2xl mb-3">🌍</div>
+        <div class="text-[13px] font-semibold text-white mb-1">Translation</div>
+        <div class="text-[11px] text-g2 leading-relaxed">Full French translation of the corrected document text.</div>
+      </div>
+      <div class="bg-card border border-border rounded-xl p-4 text-center hover:border-g1 transition-colors">
+        <div class="text-2xl mb-3">🏷️</div>
+        <div class="text-[13px] font-semibold text-white mb-1">Named Entities</div>
+        <div class="text-[11px] text-g2 leading-relaxed">Persons, organisations, locations, and dates extracted automatically.</div>
+      </div>
+      <div class="bg-card border border-teal/40 rounded-xl p-4 text-center">
+        <div class="text-2xl mb-3">🔊</div>
+        <div class="text-[13px] font-semibold text-white mb-1">Audio (gTTS)</div>
+        <div class="text-[11px] text-g2 leading-relaxed">All four outputs converted to .mp3 and streamed in-browser.</div>
+      </div>
+    </div>
+
+    <!-- run command -->
+    <div class="mt-8 bg-card border border-border rounded-xl overflow-hidden max-w-xl mx-auto">
+      <div class="flex items-center gap-1.5 px-4 py-3 border-b border-border bg-card2">
+        <span class="w-2 h-2 rounded-full bg-[#ff5f57]"></span>
+        <span class="w-2 h-2 rounded-full bg-[#febc2e]"></span>
+        <span class="w-2 h-2 rounded-full bg-[#28c840]"></span>
+        <span class="ml-3 text-[11px] text-g1 font-mono">Terminal</span>
+      </div>
+      <div class="p-4 font-mono text-[12px]">
+        <div class="text-g1"># Start the Flask web interface</div>
+        <div><span class="text-teal">$</span> <span class="text-g4">python</span> <span class="text-lime">src/llm_aided_ocr.py</span></div>
+        <div class="text-g1 mt-1"> * Running on http://127.0.0.1:5000</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ CLI USAGE ═══════════════ -->
+<section class="max-w-6xl mx-auto px-6 py-24">
+  <div class="flex flex-col lg:flex-row gap-16 items-center">
+    <div class="flex-1">
+      <div class="text-[11px] text-g2 uppercase tracking-widest font-semibold mb-4">Command-Line Interface</div>
+      <h2 class="text-[28px] font-bold leading-tight tracking-tight mb-4">Automate your<br>OCR pipeline</h2>
+      <p class="text-g3 text-[13px] leading-relaxed mb-6 max-w-sm">
+        The CLI wraps the full pipeline with fine-grained control over page ranges, hallucination filtering, Markdown output, and embedding storage.
+      </p>
+      <div class="space-y-3">
+        <div class="flex items-start gap-2.5 text-[12px]">
+          <span class="text-lime mt-0.5">●</span>
+          <div><span class="text-g4 font-semibold">--max-pages / --skip-pages</span><br><span class="text-g2">Process any subset of a document's pages</span></div>
+        </div>
+        <div class="flex items-start gap-2.5 text-[12px]">
+          <span class="text-lime mt-0.5">●</span>
+          <div><span class="text-g4 font-semibold">--no-markdown</span><br><span class="text-g2">Output plain text instead of structured Markdown</span></div>
+        </div>
+        <div class="flex items-start gap-2.5 text-[12px]">
+          <span class="text-lime mt-0.5">●</span>
+          <div><span class="text-g4 font-semibold">--threshold / --test-filtering</span><br><span class="text-g2">Tune and test hallucination similarity filtering</span></div>
+        </div>
+        <div class="flex items-start gap-2.5 text-[12px]">
+          <span class="text-lime mt-0.5">●</span>
+          <div><span class="text-g4 font-semibold">--check-english</span><br><span class="text-g2">Validate that extracted text is valid English</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLI code block -->
+    <div class="flex-1 w-full">
+      <div class="bg-card border border-border rounded-2xl overflow-hidden font-mono text-[12px] max-w-[480px]">
+        <div class="flex items-center gap-1.5 px-4 py-3 border-b border-border bg-card2">
+          <span class="w-2 h-2 rounded-full bg-[#ff5f57]"></span>
+          <span class="w-2 h-2 rounded-full bg-[#febc2e]"></span>
+          <span class="w-2 h-2 rounded-full bg-[#28c840]"></span>
+          <span class="ml-3 text-[11px] text-g1">llm-aided-ocr-cli.py</span>
+        </div>
+        <div class="p-5 leading-7">
+          <div class="text-g1"># Basic usage</div>
+          <div><span class="text-teal">$</span> python src/llm-aided-ocr-cli.py document.pdf</div>
+          <br>
+          <div class="text-g1"># Process pages 2–10 only</div>
+          <div><span class="text-teal">$</span> python src/llm-aided-ocr-cli.py document.pdf \</div>
+          <div class="pl-4"><span class="text-purple">--skip-pages</span> <span class="text-lime">1</span> <span class="text-purple">--max-pages</span> <span class="text-lime">9</span></div>
+          <br>
+          <div class="text-g1"># Plain text, validate English</div>
+          <div><span class="text-teal">$</span> python src/llm-aided-ocr-cli.py document.pdf \</div>
+          <div class="pl-4"><span class="text-purple">--no-markdown</span> <span class="text-purple">--check-english</span></div>
+          <br>
+          <div class="text-g1"># Tune hallucination filter</div>
+          <div><span class="text-teal">$</span> python src/llm-aided-ocr-cli.py document.pdf \</div>
+          <div class="pl-4"><span class="text-purple">--threshold</span> <span class="text-lime">0.35</span> <span class="text-purple">--test-filtering</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ DEPLOY / DOCKER ═══════════════ -->
+<div id="deploy" class="border-y border-border/60 py-24 bg-card/20">
+  <div class="max-w-6xl mx-auto px-6">
+    <div class="text-[11px] text-g2 uppercase tracking-widest font-semibold mb-3 text-center">Deployment</div>
+    <h2 class="text-[30px] font-bold text-center tracking-tight mb-3">Up in minutes,<br>anywhere you run containers</h2>
+    <p class="text-g3 text-center text-[14px] max-w-lg mx-auto mb-14 leading-relaxed">
+      A pre-built Docker image bundles Tesseract, Poppler, Python 3.12, and all dependencies. GPU passthrough is configured out of the box.
+    </p>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Quick start -->
+      <div>
+        <div class="text-[12px] text-g3 font-semibold mb-3">Quick Start (pip)</div>
+        <div class="bg-card border border-border rounded-xl overflow-hidden font-mono text-[12px]">
+          <div class="p-4 leading-7">
+            <div class="text-g1"># 1. Clone and enter</div>
+            <div><span class="text-teal">$</span> git clone &lt;repo-url&gt; &amp;&amp; cd llm-aided-ocr</div>
+            <br>
+            <div class="text-g1"># 2. Install dependencies</div>
+            <div><span class="text-teal">$</span> pip install -r requirements.txt</div>
+            <br>
+            <div class="text-g1"># 3. Configure</div>
+            <div><span class="text-teal">$</span> cp .env.example .env &amp;&amp; nano .env</div>
+            <br>
+            <div class="text-g1"># 4. Run</div>
+            <div><span class="text-teal">$</span> python src/llm_aided_ocr.py</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Docker -->
+      <div>
+        <div class="text-[12px] text-g3 font-semibold mb-3">Docker Compose (GPU)</div>
+        <div class="bg-card border border-border rounded-xl overflow-hidden font-mono text-[12px]">
+          <div class="p-4 leading-7">
+            <div class="text-g1"># Start with GPU support</div>
+            <div><span class="text-teal">$</span> docker compose up -d</div>
+            <br>
+            <div class="text-g1"># Image: hotwa/llm_aided_ocr:latest</div>
+            <div class="text-g1"># Port:  3232 → SSH into container</div>
+            <div class="text-g1"># VRAM:  32 GB shared memory</div>
+            <br>
+            <div class="text-g1"># Run OCR on a file</div>
+            <div><span class="text-teal">$</span> docker exec llm_aided_ocr \</div>
+            <div class="pl-4">python src/llm_aided_ocr.py</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- requirements highlight -->
+    <div class="mt-8 bg-card border border-border rounded-xl p-5">
+      <div class="text-[11px] text-g2 uppercase tracking-wider font-semibold mb-4">System Requirements</div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-card2 rounded-lg p-3 text-center">
+          <div class="text-lime font-bold text-[14px] mb-1">Python 3.8+</div>
+          <div class="text-[11px] text-g1">Core runtime</div>
+        </div>
+        <div class="bg-card2 rounded-lg p-3 text-center">
+          <div class="text-lime font-bold text-[14px] mb-1">Tesseract 4+</div>
+          <div class="text-[11px] text-g1">OCR engine</div>
+        </div>
+        <div class="bg-card2 rounded-lg p-3 text-center">
+          <div class="text-lime font-bold text-[14px] mb-1">Poppler</div>
+          <div class="text-[11px] text-g1">PDF rasteriser</div>
+        </div>
+        <div class="bg-card2 rounded-lg p-3 text-center">
+          <div class="text-lime font-bold text-[14px] mb-1">CUDA (opt.)</div>
+          <div class="text-[11px] text-g1">GPU acceleration</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ RESEARCH & RESOURCES ═══════════════ -->
+<section id="research" class="max-w-6xl mx-auto px-6 py-24">
+  <div class="text-[11px] text-g2 uppercase tracking-widest font-semibold mb-3 text-center">Academic Work</div>
+  <h2 class="text-[30px] font-bold text-center tracking-tight mb-3">Research, Patents &amp; Presentations</h2>
+  <p class="text-g3 text-center text-[14px] max-w-lg mx-auto mb-14 leading-relaxed">
+    This project is backed by a peer-reviewed research paper, a patent filing, a capstone presentation, and a conference poster.
+  </p>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <!-- Research paper -->
+    <div class="bg-card border border-border rounded-xl p-5 flex flex-col hover:border-g1 transition-colors">
+      <div class="text-2xl mb-3">📄</div>
+      <div class="text-[11px] text-g1 uppercase tracking-wider font-semibold mb-1">Research Paper</div>
+      <div class="text-[13px] font-bold text-white mb-2 leading-tight">LLM-Aided OCR: Enhancing OCR Quality with Large Language Models</div>
+      <p class="text-[11px] text-g2 leading-relaxed flex-1">Proposes the end-to-end pipeline: image pre-processing, Tesseract extraction, LLM correction, Markdown conversion, and quality scoring.</p>
+      <a href="docs/research/Research_paper_OCR_LLM.docx" class="text-lime text-[12px] font-semibold mt-4 hover:underline">Download .docx &rsaquo;</a>
+    </div>
+
+    <!-- Patent -->
+    <div class="bg-card border border-border rounded-xl p-5 flex flex-col hover:border-g1 transition-colors">
+      <div class="text-2xl mb-3">⚖️</div>
+      <div class="text-[11px] text-g1 uppercase tracking-wider font-semibold mb-1">Patent Filing</div>
+      <div class="text-[13px] font-bold text-white mb-2 leading-tight">Method and System for LLM-Assisted OCR Post-Processing</div>
+      <p class="text-[11px] text-g2 leading-relaxed flex-1">Patent application covering the chunking strategy, context-aware LLM prompting, and automated quality assessment methodology.</p>
+      <a href="docs/patents/PATENT_OCR_LLM_17_mar.docx" class="text-lime text-[12px] font-semibold mt-4 hover:underline">Download .docx &rsaquo;</a>
+    </div>
+
+    <!-- Capstone PPT -->
+    <div class="bg-card border border-purple/30 rounded-xl p-5 flex flex-col hover:border-purple/60 transition-colors">
+      <div class="text-2xl mb-3">🎓</div>
+      <div class="text-[11px] text-g1 uppercase tracking-wider font-semibold mb-1">Capstone Presentation</div>
+      <div class="text-[13px] font-bold text-white mb-2 leading-tight">Capstone Project — LLM-Aided OCR System</div>
+      <p class="text-[11px] text-g2 leading-relaxed flex-1">Full project defence slides covering motivation, system architecture, experimental results, and future directions.</p>
+      <a href="docs/presentations/capstone_ppt.pptx" class="text-lime text-[12px] font-semibold mt-4 hover:underline">Download .pptx &rsaquo;</a>
+    </div>
+
+    <!-- Poster -->
+    <div class="bg-card border border-teal/30 rounded-xl p-5 flex flex-col hover:border-teal/60 transition-colors">
+      <div class="text-2xl mb-3">🖼️</div>
+      <div class="text-[11px] text-g1 uppercase tracking-wider font-semibold mb-1">Conference Poster</div>
+      <div class="text-[13px] font-bold text-white mb-2 leading-tight">Poster: LLM-Aided OCR Pipeline</div>
+      <p class="text-[11px] text-g2 leading-relaxed flex-1">Visual summary of the pipeline, results, and benchmark comparisons presented at the departmental showcase.</p>
+      <a href="docs/presentations/poster_llm_ocr.pptx" class="text-lime text-[12px] font-semibold mt-4 hover:underline">Download .pptx &rsaquo;</a>
+    </div>
+  </div>
+
+  <!-- Sample data -->
+  <div class="mt-8 bg-card border border-border rounded-xl p-6">
+    <div class="text-[11px] text-g2 uppercase tracking-wider font-semibold mb-4">Sample Data — Warren Buffett Pension Letter (1975)</div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <a href="samples/160301289-Warren-Buffett-Katharine-Graham-Letter.pdf" class="bg-card2 rounded-lg px-4 py-3 flex items-center gap-3 hover:bg-surf transition-colors">
+        <span class="text-lg">📑</span>
+        <div>
+          <div class="text-[12px] text-g4 font-medium">Original PDF</div>
+          <div class="text-[10px] text-g1 font-mono">…Letter.pdf</div>
+        </div>
+      </a>
+      <a href="samples/160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt" class="bg-card2 rounded-lg px-4 py-3 flex items-center gap-3 hover:bg-surf transition-colors">
+        <span class="text-lg">🔴</span>
+        <div>
+          <div class="text-[12px] text-g4 font-medium">Raw OCR Output</div>
+          <div class="text-[10px] text-g1 font-mono">…__raw_ocr_output.txt</div>
+        </div>
+      </a>
+      <a href="samples/160301289-Warren-Buffett-Katharine-Graham-Letter_llm_corrected.md" class="bg-card2 rounded-lg px-4 py-3 flex items-center gap-3 hover:bg-surf transition-colors">
+        <span class="text-lg">🟢</span>
+        <div>
+          <div class="text-[12px] text-g4 font-medium">LLM-Corrected Output</div>
+          <div class="text-[10px] text-g1 font-mono">…_llm_corrected.md</div>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ FINAL CTA ═══════════════ -->
+<div class="border-t border-border/60 py-20 text-center">
+  <h2 class="text-[32px] font-bold tracking-tight leading-tight mb-3">Stop fighting noisy OCR.<br>Let the LLM fix it.</h2>
+  <p class="text-g3 text-[14px] mb-8 max-w-md mx-auto">Get started in minutes with pip, or pull the Docker image. OpenAI or fully local — you choose.</p>
+  <div class="flex flex-wrap justify-center gap-3">
+    <a href="#deploy" class="bg-lime text-limedark font-semibold text-[13px] px-6 py-2.5 rounded-md hover:brightness-95 transition-all">Get Started Free</a>
+    <a href="#research" class="border border-border text-white text-[13px] font-medium px-6 py-2.5 rounded-md hover:border-g1 transition-colors">Read the Paper</a>
+  </div>
+</div>
+
+<!-- ═══════════════ FOOTER ═══════════════ -->
+<footer class="border-t border-border/60">
+  <div class="max-w-6xl mx-auto px-6 py-12">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
+      <div class="col-span-2 md:col-span-1">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-6 h-6 bg-lime rounded flex items-center justify-center shrink-0">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="1.5" rx=".75" fill="#0e0f11"/><rect x="2" y="7" width="8" height="1.5" rx=".75" fill="#0e0f11"/><rect x="2" y="11" width="10" height="1.5" rx=".75" fill="#0e0f11"/></svg>
+          </div>
+          <span class="font-bold text-[14px]">LLM-Aided OCR</span>
+        </div>
+        <p class="text-[12px] text-g1 leading-relaxed">Advanced PDF-to-text with LLM correction. Open-source. Multi-provider.</p>
+      </div>
+      <div>
+        <div class="text-[11px] font-semibold text-g4 uppercase tracking-wider mb-3">Project</div>
+        <div class="space-y-2">
+          <a href="src/llm_aided_ocr.py"     class="block text-[12px] text-g1 hover:text-white transition-colors">Main Script</a>
+          <a href="src/llm-aided-ocr-cli.py" class="block text-[12px] text-g1 hover:text-white transition-colors">CLI Tool</a>
+          <a href="notebooks/OCR_phase1.ipynb" class="block text-[12px] text-g1 hover:text-white transition-colors">Notebook</a>
+          <a href="requirements.txt"          class="block text-[12px] text-g1 hover:text-white transition-colors">Requirements</a>
+        </div>
+      </div>
+      <div>
+        <div class="text-[11px] font-semibold text-g4 uppercase tracking-wider mb-3">Research</div>
+        <div class="space-y-2">
+          <a href="docs/research/Research_paper_OCR_LLM.docx"         class="block text-[12px] text-g1 hover:text-white transition-colors">Research Paper</a>
+          <a href="docs/patents/PATENT_OCR_LLM_17_mar.docx"           class="block text-[12px] text-g1 hover:text-white transition-colors">Patent</a>
+          <a href="docs/presentations/capstone_ppt.pptx"               class="block text-[12px] text-g1 hover:text-white transition-colors">Capstone PPT</a>
+          <a href="docs/presentations/poster_llm_ocr.pptx"             class="block text-[12px] text-g1 hover:text-white transition-colors">Poster</a>
+        </div>
+      </div>
+      <div>
+        <div class="text-[11px] font-semibold text-g4 uppercase tracking-wider mb-3">Samples</div>
+        <div class="space-y-2">
+          <a href="samples/160301289-Warren-Buffett-Katharine-Graham-Letter.pdf"                    class="block text-[12px] text-g1 hover:text-white transition-colors">Sample PDF</a>
+          <a href="samples/160301289-Warren-Buffett-Katharine-Graham-Letter__raw_ocr_output.txt"    class="block text-[12px] text-g1 hover:text-white transition-colors">Raw OCR Output</a>
+          <a href="samples/160301289-Warren-Buffett-Katharine-Graham-Letter_llm_corrected.md"       class="block text-[12px] text-g1 hover:text-white transition-colors">LLM Corrected</a>
+        </div>
+      </div>
+    </div>
+    <div class="border-t border-border/60 pt-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+      <div class="text-[12px] text-g1">LLM-Aided OCR · Open-source · Python + Tesseract + LLM</div>
+      <div class="flex items-center gap-4">
+        <a href="docker-compose.yml" class="text-[12px] text-g1 hover:text-white transition-colors">Docker</a>
+        <a href="README.md"          class="text-[12px] text-g1 hover:text-white transition-colors">README</a>
+        <a href="https://github.com/omprxkash/llm-aided-ocr" class="text-[12px] text-g1 hover:text-white transition-colors">GitHub</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
